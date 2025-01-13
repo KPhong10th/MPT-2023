@@ -1,0 +1,115 @@
+#PREDICT THE BEST TECH STOCKS TO BUY IN 2023
+import yfinance as yf
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error
+import matplotlib.pyplot as plt
+
+# Step 1: Fetch Historical Stock Data
+def fetch_stock_data(ticker_list, start_date, end_date):
+    data = {}
+    for ticker in ticker_list:
+        stock = yf.Ticker(ticker)
+        hist = stock.history(start=start_date, end=end_date)
+        data[ticker] = hist
+    return data
+
+# Step 2: Preprocess Data
+def preprocess_data(stock_data):
+    features = []
+    labels = []
+    for ticker, data in stock_data.items():
+        data['1M_Return'] = data['Close'].pct_change(periods=21)
+        data['3M_Return'] = data['Close'].pct_change(periods=63)
+        data['Volatility'] = data['Close'].rolling(window=21).std()
+        data = data.dropna()
+
+        for i in range(len(data) - 1):
+            row = data.iloc[i]
+            features.append([row['1M_Return'], row['3M_Return'], row['Volatility']])
+            labels.append(data.iloc[i + 1]['Close'])
+
+    return np.array(features), np.array(labels)
+
+# Step 3: Train and Test Split
+def split_data(features, labels):
+    return train_test_split(features, labels, test_size=0.2, random_state=42)
+
+# Step 4: Train Model
+def train_model(X_train, y_train):
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
+    return model
+
+# Step 5: Evaluate Model
+def evaluate_model(model, X_test, y_test):
+    predictions = model.predict(X_test)
+    mae = mean_absolute_error(y_test, predictions)
+    return predictions, mae
+
+# Step 6: Visualize Results
+def visualize_predictions(y_test, predictions):
+    plt.figure(figsize=(10, 6))
+    plt.plot(y_test, label='Actual Prices', alpha=0.7)
+    plt.plot(predictions, label='Predicted Prices', alpha=0.7)
+    plt.legend()
+    plt.title('Actual vs Predicted Stock Prices')
+    plt.show()
+
+# Main Execution
+if __name__ == "__main__":
+    # Define parameters
+    TICKERS = ["TSLA", "NVDA", "AI", "AMD"]
+    START_DATE = "2021-01-01"
+    END_DATE = "2022-12-31"
+
+    # Fetch and preprocess data
+    stock_data = fetch_stock_data(TICKERS, START_DATE, END_DATE)
+    features, labels = preprocess_data(stock_data)
+
+    # Split data
+    X_train, X_test, y_train, y_test = split_data(features, labels)
+
+    # Train and evaluate model
+    model = train_model(X_train, y_train)
+    predictions, mae = evaluate_model(model, X_test, y_test)
+
+    print(f"Mean Absolute Error: {mae}")
+
+    # Visualize results
+    visualize_predictions(y_test, predictions)
+
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report
+
+# Calculate 1Y_Return and Target for each stock
+for ticker, data in stock_data.items():
+    data['1Y_Return'] = (data['Close'].shift(-252) - data['Close']) / data['Close']
+    data['Target'] = data['1Y_Return'].apply(lambda x: 1 if x > 0.2 else 0)
+    stock_data[ticker] = data.dropna()  # Drop rows with NaN values
+
+# Combine all processed DataFrames
+all_data = pd.concat(stock_data.values(), keys=stock_data.keys(), names=['Ticker', 'Index'])
+
+# Features and labels
+features = all_data[['1M_Return', '3M_Return', 'Volatility']]
+labels = all_data['Target']
+
+# Split data and train classifier
+X_train, X_test, y_train, y_test = train_test_split(features, labels, test_size=0.2, random_state=42)
+classifier = RandomForestClassifier(n_estimators=100, random_state=42)
+classifier.fit(X_train, y_train)
+
+# Predict and evaluate
+predictions = classifier.predict(X_test)
+print("Accuracy:", accuracy_score(y_test, predictions))
+print(classification_report(y_test, predictions))
+
+# Rank stocks
+all_data['Prediction_Probability'] = classifier.predict_proba(features)[:, 1]
+top_stocks = all_data.sort_values(by='Prediction_Probability', ascending=False).head(10)
+print("Top Stocks for 2023:")
+print(top_stocks[['Prediction_Probability', '1Y_Return']])
+
